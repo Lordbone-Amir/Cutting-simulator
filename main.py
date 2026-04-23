@@ -18,6 +18,7 @@ from geometry import Polygon, Point, Polyline, is_true_divide
 from kivy.clock import Clock
 from kivy.graphics import Color, Line, Ellipse, Rectangle, StencilPush, StencilUse, StencilPop
 from kivy.properties import ListProperty
+import threading
 
 class DrawingArea(Widget):
     vertices = ListProperty([])
@@ -265,7 +266,7 @@ class GameScreen(Screen):
         layout = BoxLayout(orientation='vertical', padding=5, spacing=5)
 
         top_bar = BoxLayout(orientation='horizontal', size_hint=(1, None), height=30)
-        self.info_label = Label(text='Сложность: 5', size_hint=(1, 1))
+        self.info_label = Label(text='Сложность: 5', size_hint=(1, 1), color=(0.5, 0.5, 0.5, 1))
         top_bar.add_widget(self.info_label)
         layout.add_widget(top_bar)
 
@@ -299,31 +300,47 @@ class GameScreen(Screen):
             return
         self._generating = True
         self.new_btn.disabled = True
+        self.info_label.text = 'Генерация'
+        self._start_loading_animation()
+        # Run generation in a separate thread
+        threading.Thread(target=self._generate_polygon, daemon=True).start()
+
+    def _generate_polygon(self):
         try:
             polygon = Polygon()
             poly, first_ans, second_ans = polygon.generate(int(self.complexity))
             vertices = list(poly.arr)
             first_ans = first_ans.arr
             second_ans = second_ans.arr
-            self.drawing_area.poly = poly
-            self.drawing_area.vertices = vertices
-            self.drawing_area.line.clear()
-            self.drawing_area.count_of_line = 0
-            self.drawing_area.line_color = COLOR_CUT_LINE
-            self.first_ans = first_ans
-            self.second_ans = second_ans
-            self.drawing_area.first_ans = first_ans
-            self.drawing_area.second_ans = second_ans
-            self.show_answer = False
-            self.drawing_area.show_answer = False
-            self.answer_btn.text = 'Показать ответ'
-            self.info_label.text = f'Сложность: {int(self.complexity)}'
-            self.drawing_area.update_canvas()
+            # Schedule UI update on main thread
+            Clock.schedule_once(lambda dt: self._update_ui(poly, vertices, first_ans, second_ans), 0)
         except Exception as e:
-            self.info_label.text = f'Ошибка: {e}'
-        finally:
-            self._generating = False
-            self.new_btn.disabled = False
+            Clock.schedule_once(lambda dt: self._handle_error(e), 0)
+
+    def _update_ui(self, poly, vertices, first_ans, second_ans):
+        self._stop_loading_animation()
+        self.drawing_area.poly = poly
+        self.drawing_area.vertices = vertices
+        self.drawing_area.line.clear()
+        self.drawing_area.count_of_line = 0
+        self.drawing_area.line_color = COLOR_CUT_LINE
+        self.first_ans = first_ans
+        self.second_ans = second_ans
+        self.drawing_area.first_ans = first_ans
+        self.drawing_area.second_ans = second_ans
+        self.show_answer = False
+        self.drawing_area.show_answer = False
+        self.answer_btn.text = 'Показать ответ'
+        self.info_label.text = f'Сложность: {int(self.complexity)}'
+        self.drawing_area.update_canvas()
+        self._generating = False
+        self.new_btn.disabled = False
+
+    def _handle_error(self, e):
+        self._stop_loading_animation()
+        self.info_label.text = f'Ошибка: {e}'
+        self._generating = False
+        self.new_btn.disabled = False
 
     def toggle_answer(self, instance):
         print("Кнопка 'Показать ответ' нажата")
@@ -337,9 +354,27 @@ class GameScreen(Screen):
         self.drawing_area.clear_line()
 
     def regenerate_polygon(self, instance):
-        self.is_generating = True
-        print("Кнопка 'Новая генерация' нажата")
-        self.on_enter()
+        if self._generating:
+            return
+        self._generating = True
+        self.new_btn.disabled = True
+        self.info_label.text = 'Генерация'
+        self._start_loading_animation()
+        # Run generation in a separate thread
+        threading.Thread(target=self._generate_polygon, daemon=True).start()
+
+    def _start_loading_animation(self):
+        self._loading_dots = 0
+        self._loading_event = Clock.schedule_interval(self._update_loading_text, 0.5)
+
+    def _update_loading_text(self, dt):
+        self._loading_dots = (self._loading_dots + 1) % 4
+        dots = '.' * self._loading_dots
+        self.info_label.text = f'Генерация{dots}'
+
+    def _stop_loading_animation(self):
+        if hasattr(self, '_loading_event'):
+            self._loading_event.cancel()
 
     def go_to_menu(self, instance):
         print("Кнопка 'Меню' нажата")
@@ -355,12 +390,12 @@ class MainMenu(Screen):
         layout = BoxLayout(orientation='vertical', padding=20, spacing=20)
 
         layout.add_widget(Label(text='Разрежь многоугольник пополам',
-                                font_size='28sp', size_hint=(1, 0.15)))
+                                font_size='28sp', size_hint=(1, 0.15), color=(0.5, 0.5, 0.5, 1)))
 
         complexity_box = BoxLayout(orientation='horizontal', size_hint=(1, 0.1))
-        complexity_box.add_widget(Label(text='Сложность:', size_hint=(0.3, 1)))
+        complexity_box.add_widget(Label(text='Сложность:', size_hint=(0.3, 1), color=(0.5, 0.5, 0.5, 1)))
 
-        self.complexity_label = Label(text=str(self.complexity), size_hint=(0.1, 1))
+        self.complexity_label = Label(text=str(self.complexity), size_hint=(0.1, 1), color=(0.5, 0.5, 0.5, 1))
         complexity_box.add_widget(self.complexity_label)
 
         self.slider = Slider(min=2, max=6, value=self.complexity, step=1, size_hint=(0.6, 1))
