@@ -3,6 +3,7 @@ from random import randint
 from const import *
 from shapely import Polygon as poly
 from shapely.ops import unary_union
+from math import acos,radians
 
 class Point: 
     def __init__(self,x,y):
@@ -12,11 +13,14 @@ class Point:
         return Point(self.x + other.x, self.y + other.y)
     def __repr__(self):
         return f"Point({self.x}, {self.y})"
+    
     def __mul__(self, other):
         if isinstance(other,Point):
             return self.x * other.y - self.y * other.x
         else:
             return Point(self.x * other,self.y * other)
+    def __mod__(self,other):
+        return self.x * other.x + self.y * other.y
     def __eq__(self, other):
         return self.x == other.x and self.y == other.y
     def __lt__(self, other):
@@ -66,6 +70,15 @@ def tri_eq(fa,fb,fc,sa,sb,sc):
     return fa.len2() == sa.len2() and fb.len2() == sb.len2() and fc.len2() == sc.len2()
 def tri_eq_dec(fa,fb,fc,sa,sb,sc):
     return tri_eq(fa - fb,fa - fc,fb - fc,sa - sb,sa - sc,sb - sc)
+
+
+
+SMALL_COS = acos(radians(10)) ** 2
+def is_angle_small(a,b):
+    if randint(1,10) == 1:
+        return True
+    return (a % b) ** 2 < a.len2() * b.len2() * SMALL_COS 
+
 
 class Polyline:
     def __init__(self):
@@ -130,8 +143,9 @@ class Polygon:
             if flag:
                 continue
             #print(p.x,p.y)
-            if self.cross_edg(self.arr[ind - 1], p) and self.cross_edg(self.arr[ind], p):
-                self.arr.insert(ind,p)
+            if  is_angle_small(self.arr[ind - 1] - p,self.arr[ind] - p) and is_angle_small(self.arr[ind - 2] - self.arr[ind - 1],p - self.arr[ind - 1]) and is_angle_small(self.arr[(ind + 1) % self.size()] - self.arr[ind],p - self.arr[ind]):
+                    if self.cross_edg(self.arr[ind - 1], p) and self.cross_edg(self.arr[ind], p):
+                        self.arr.insert(ind,p)
     def is_in(self, pt):
         if self.fined_pos(pt) != -1:
             return True
@@ -282,7 +296,7 @@ class Polygon:
     def generate(self, complexity):
         # for i in range(self.size()):
         #     print(self.arr[i])
-        #complexity += 3
+        #complexity += 2
         cnt = 0
         while True:
             cnt += 1
@@ -339,6 +353,9 @@ class Polygon:
         for i in range(line.size() - 2):
             if is_cross_in(line.arr[i], line.arr[i + 1], line.arr[-1], line.arr[-2]):
                 return False
+        for i in range(line.size() - 2):
+            if in_seg(line.arr[-1],line.arr[i],line.arr[i + 1]):
+                return False
         return True
 
     def is_line_correct(self,line):
@@ -347,6 +364,9 @@ class Polygon:
             return False
         if line.size() < 2:
             print("Line has less than 2 points")
+            return False
+        if line.arr[0] == line.arr[-1]:
+            print("First and last point eq")
             return False
         begin = self.fined_pos(line.arr[0])
         if begin == -1:
@@ -373,25 +393,36 @@ class Polygon:
     def divide(self, line):
         if not self.is_line_correct(line):
             return -1
-        
-        begin,end = self.fined_pos(line.arr[0]),self.fined_pos(line.arr[-1])
         first = []
         second = []
-        i = begin
-        while i != end:
-            first.append(self.arr[i])
-            i += 1
-            if i == self.size():
-                i -= self.size()
-        for j in line.arr[::-1]:
-            first.append(j)
-        while i != begin:
-            second.append(self.arr[i])
-            i += 1
-            if i == self.size():
-                i -= self.size()
-        for j in line.arr:
-            second.append(j)
+        dev = []
+        for i in range(self.size()):
+            dev.append(self.arr[i - 1])
+            if in_seg(line.arr[0],self.arr[i - 1],self.arr[i]):
+                if in_seg(line.arr[-1],self.arr[i - 1],self.arr[i]):
+                    if in_seg(line.arr[0], self.arr[i - 1],line.arr[-1]):
+                        dev.append(line.arr[0])
+                        dev.append(line.arr[-1])
+                    else:
+                        dev.append(line.arr[0])
+                        dev.append(line.arr[-1])
+                else :
+                    dev.append(line.arr[0])
+            elif in_seg(line.arr[-1],self.arr[i - 1],self.arr[i]):
+                dev.append(line.arr[-1])
+        for i in dev:
+            first.append(i)
+            if i == line.arr[0]:
+                for j in line.arr[1:]:
+                    first.append(j)
+                second.append(line.arr[0])
+                first,second = second,first
+            if i == line.arr[-1]:
+                for j in line.arr[-2::-1]:
+                    first.append(j)
+                second.append(line.arr[-1])
+                first,second = second,first
+
         first = Polygon(first)
         second = Polygon(second)
         first.delete()
@@ -415,7 +446,10 @@ def is_true_divide(poly,line):
 
                     
 
-
+# pol = Polygon()
+# pol.generate(2)
+# print(pol.arr)
+# pol.gene
 # import sys
 
 # # Теперь любой input() будет брать данные из файла input.txt
@@ -424,15 +458,13 @@ def is_true_divide(poly,line):
 # n = int(input())
 # l = []
 # for i in range(n):
-#     s = input().replace("(", "").replace(")", "")
-#     x, y = map(int, s.split(", "))
+#     x, y = map(int,input().split())
 #     l.append(Point(x,y))
 # poly = Polygon(l)
 # line = Polyline()
 # n = int(input())
-# for i in range(n):
-#     s = input().replace("(", "").replace(")", "")
-#     x, y = map(int, s.split(","))
+# for i in range(n):    
+#     x, y = map(int,input().split())
 #     line.append(Point(x,y))
 #     if line.size() > 1 and poly.draw_line(line):
 #         print(f"Line is valid with new point ({x}, {y})")

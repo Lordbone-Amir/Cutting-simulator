@@ -4,6 +4,7 @@ from kivy.uix.slider import Slider
 from kivy.uix.label import Label
 from kivy.uix.button import Button
 from kivy.uix.widget import Widget
+from kivy.uix.scrollview import ScrollView
 from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.graphics import Color, Line
 from kivy.properties import ListProperty, NumericProperty
@@ -263,6 +264,7 @@ class GameScreen(Screen):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.loaded_level = None
         layout = BoxLayout(orientation='vertical', padding=5, spacing=5)
 
         top_bar = BoxLayout(orientation='horizontal', size_hint=(1, None), height=30)
@@ -273,19 +275,22 @@ class GameScreen(Screen):
         self.drawing_area = DrawingArea()
         layout.add_widget(self.drawing_area)
 
-        bottom_bar = BoxLayout(orientation='vertical', size_hint=(1, None), height=150)
+        bottom_bar = BoxLayout(orientation='vertical', size_hint=(1, None), height=180)
         self.new_btn = Button(text='Новая генерация')
         self.new_btn.bind(on_press=self.regenerate_polygon)
         self.answer_btn = Button(text='Показать ответ')
         self.answer_btn.bind(on_press=self.toggle_answer)
         self.clear_btn = Button(text='Сброс линии')
         self.clear_btn.bind(on_press=self.clear_line)
+        self.save_btn = Button(text='Сохранить уровень')
+        self.save_btn.bind(on_press=self.save_level)
         self.menu_btn = Button(text='Меню')
         self.menu_btn.bind(on_press=self.go_to_menu)
 
         bottom_bar.add_widget(self.new_btn)
         bottom_bar.add_widget(self.answer_btn)
         bottom_bar.add_widget(self.clear_btn)
+        bottom_bar.add_widget(self.save_btn)
         bottom_bar.add_widget(self.menu_btn)
         layout.add_widget(bottom_bar)
 
@@ -296,6 +301,10 @@ class GameScreen(Screen):
         self.show_answer = False
 
     def on_enter(self, *args):
+        if self.loaded_level:
+            self.load_selected_level()
+            self.loaded_level = None
+            return
         if self._generating:
             return
         self._generating = True
@@ -342,6 +351,28 @@ class GameScreen(Screen):
         self._generating = False
         self.new_btn.disabled = False
 
+    def load_selected_level(self):
+        level = self.loaded_level
+        poly = Polygon(level['poly'])
+        first_ans = level['first']
+        second_ans = level['second']
+        self.drawing_area.poly = poly
+        self.drawing_area.vertices = list(poly.arr)
+        self.drawing_area.schedule_update()
+        self.drawing_area.line.clear()
+        self.drawing_area.count_of_line = 0
+        self.drawing_area.line_color = COLOR_CUT_LINE
+        self.first_ans = first_ans
+        self.second_ans = second_ans
+        self.drawing_area.first_ans = first_ans
+        self.drawing_area.second_ans = second_ans
+        self.show_answer = False
+        self.drawing_area.show_answer = False
+        self.answer_btn.text = 'Показать ответ'
+        self.info_label.text = f'Загружен уровень (n={level["n"]}, m={level["m"]})'
+        self._generating = False
+        self.new_btn.disabled = False
+
     def toggle_answer(self, instance):
         print("Кнопка 'Показать ответ' нажата")
         self.show_answer = not self.show_answer
@@ -352,6 +383,87 @@ class GameScreen(Screen):
     def clear_line(self, instance):
         print("Кнопка 'Сброс линии' нажата")
         self.drawing_area.clear_line()
+
+    def save_level(self, instance):
+        print("Кнопка 'Сохранить уровень' нажата")
+        if not hasattr(self, 'drawing_area') or not self.drawing_area.poly:
+            print("Нет полигона для сохранения")
+            return
+        poly = self.drawing_area.poly
+        first = self.first_ans
+        second = self.second_ans
+        if not first or not second:
+            print("Нет ответа для сохранения")
+            return
+        n = len(poly.arr)
+        m = len(first)
+        if len(second) != m:
+            print("Разные размеры ответов")
+            return
+        # Загрузить существующие уровни
+        levels = self.load_levels()
+        # Добавить текущий уровень
+        current = {'n': n, 'm': m, 'poly': poly.arr, 'first': first, 'second': second}
+        levels.append(current)
+        # Перезаписать файл
+        try:
+            with open('save.txt', 'w') as f:
+                f.seek(0)
+                f.write(f"{len(levels)}\n")
+                for level in levels:
+                    f.write(f"{level['n']} {level['m']}\n")
+                    for p in level['poly']:
+                        f.write(f"{int(p.x)} {int(p.y)}\n")
+                    for p in level['first']:
+                        f.write(f"{int(p.x)} {int(p.y)}\n")
+                    for p in level['second']:
+                        f.write(f"{int(p.x)} {int(p.y)}\n")
+            print(f"Уровень сохранен. Всего уровней: {len(levels)}")
+            
+        except Exception as e:
+            print(f"Ошибка сохранения: {e}")
+        finally:
+            f.close()
+
+    def load_levels(self):
+        try:
+            with open('save.txt', 'r') as f:
+                lines = f.readlines()
+            if not lines:
+                return []
+            first_line = lines[0].strip().split()
+            if len(first_line) == 1:
+                # Новый формат: k уровней
+                k = int(first_line[0])
+                idx = 1
+            else:
+                # Старый формат: один уровень без k
+                k = 1
+                idx = 0
+            levels = []
+            for _ in range(k):
+                n, m = map(int, lines[idx].split())
+                idx += 1
+                poly = []
+                for _ in range(n):
+                    x, y = map(int, lines[idx].split())
+                    poly.append(Point(x, y))
+                    idx += 1
+                first = []
+                for _ in range(m):
+                    x, y = map(int, lines[idx].split())
+                    first.append(Point(x, y))
+                    idx += 1
+                second = []
+                for _ in range(m):
+                    x, y = map(int, lines[idx].split())
+                    second.append(Point(x, y))
+                    idx += 1
+                levels.append({'n': n, 'm': m, 'poly': poly, 'first': first, 'second': second})
+            return levels
+        except Exception as e:
+            print(f"Ошибка загрузки уровней: {e}")
+            return []
 
     def regenerate_polygon(self, instance):
         if self._generating:
@@ -383,7 +495,7 @@ class GameScreen(Screen):
 
 class MainMenu(Screen):
     """Главное меню с выбором сложности."""
-    complexity = NumericProperty(5)
+    complexity = NumericProperty(3)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -407,6 +519,10 @@ class MainMenu(Screen):
         play_btn.bind(on_press=self.start_game)
         layout.add_widget(play_btn)
 
+        load_btn = Button(text='Загрузить уровень', size_hint=(1, 0.15))
+        load_btn.bind(on_press=self.load_level)
+        layout.add_widget(load_btn)
+
         layout.add_widget(Widget(size_hint=(1, 0.6)))
         self.add_widget(layout)
 
@@ -419,15 +535,143 @@ class MainMenu(Screen):
         print("Кнопка 'Играть' нажата")
         game_screen = self.manager.get_screen('game')
         game_screen.complexity = self.complexity
+        game_screen.loaded_level = None  # сбросить, если был
         self.manager.current = 'game'
+
+    def load_level(self, instance):
+        print("Кнопка 'Загрузить уровень' нажата")
+        self.manager.current = 'level_select'
     
 
+class LevelSelectScreen(Screen):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        layout = BoxLayout(orientation='vertical', padding=20, spacing=20)
+        layout.add_widget(Label(text='Выберите уровень', font_size='24sp', size_hint=(1, 0.1), color=(0.5, 0.5, 0.5, 1)))
+        
+        self.scroll = ScrollView(size_hint=(1, 0.8))
+        self.level_container = BoxLayout(orientation='vertical', size_hint_y=None)
+        self.level_container.bind(minimum_height=self.level_container.setter('height'))
+        self.scroll.add_widget(self.level_container)
+        layout.add_widget(self.scroll)
+        
+        back_btn = Button(text='Назад', size_hint=(1, 0.1))
+        back_btn.bind(on_press=self.go_back)
+        layout.add_widget(back_btn)
+        self.add_widget(layout)
+        
+        self.refresh_levels()
+    
+    def refresh_levels(self):
+        """Перечитывает save.txt и перестраивает список кнопок уровней"""
+        self.level_container.clear_widgets()
+        self.levels = self.load_levels()
+        
+        if not self.levels:
+            self.level_container.add_widget(Label(text="Нет сохраненных уровней", color=(0.5, 0.5, 0.5, 1)))
+        else:
+            for i, level in enumerate(self.levels):
+                # Горизонтальный контейнер для строки: кнопка уровня + кнопка удаления
+                row = BoxLayout(orientation='horizontal', size_hint_y=None, height=50, spacing=5)
+                
+                # Кнопка выбора уровня (занимает почти всю ширину)
+                level_btn = Button(text=f"Уровень {i+1} (n={level['n']}, m={level['m']})", size_hint_x=0.85)
+                level_btn.level_index = i
+                level_btn.bind(on_press=self.select_level)
+                row.add_widget(level_btn)
+                
+                # Кнопка удаления (крестик)
+                del_btn = Button(text="Удалить уровень", size_hint_x=0.20, background_normal='', background_color=(0.8, 0.2, 0.2, 1))
+                del_btn.level_index = i
+                del_btn.bind(on_press=self.delete_level)
+                row.add_widget(del_btn)
+                
+                self.level_container.add_widget(row)
+    
+    def on_pre_enter(self):
+        self.refresh_levels()
+    
+    def load_levels(self):
+        try:
+            with open('save.txt', 'r') as f:
+                lines = f.readlines()
+            if not lines:
+                return []
+            first_line = lines[0].strip().split()
+            if len(first_line) == 1:
+                k = int(first_line[0])
+                idx = 1
+            else:
+                k = 1
+                idx = 0
+            levels = []
+            for _ in range(k):
+                n, m = map(int, lines[idx].split())
+                idx += 1
+                poly = []
+                for _ in range(n):
+                    x, y = map(int, lines[idx].split())
+                    poly.append(Point(x, y))
+                    idx += 1
+                first = []
+                for _ in range(m):
+                    x, y = map(int, lines[idx].split())
+                    first.append(Point(x, y))
+                    idx += 1
+                second = []
+                for _ in range(m):
+                    x, y = map(int, lines[idx].split())
+                    second.append(Point(x, y))
+                    idx += 1
+                levels.append({'n': n, 'm': m, 'poly': poly, 'first': first, 'second': second})
+            return levels
+        except Exception as e:
+            print(f"Ошибка загрузки уровней: {e}")
+            return []
+    
+    def delete_level(self, instance):
+        """Удаляет уровень по индексу и перезаписывает файл"""
+        idx = instance.level_index
+        if 0 <= idx < len(self.levels):
+            # Удаляем из списка в памяти
+            del self.levels[idx]
+            # Перезаписываем файл
+            try:
+                with open('save.txt', 'w') as f:
+                    f.write(f"{len(self.levels)}\n")
+                    for level in self.levels:
+                        f.write(f"{level['n']} {level['m']}\n")
+                        for p in level['poly']:
+                            f.write(f"{int(p.x)} {int(p.y)}\n")
+                        for p in level['first']:
+                            f.write(f"{int(p.x)} {int(p.y)}\n")
+                        for p in level['second']:
+                            f.write(f"{int(p.x)} {int(p.y)}\n")
+                print(f"Уровень {idx+1} удалён. Осталось уровней: {len(self.levels)}")
+            except Exception as e:
+                print(f"Ошибка удаления уровня: {e}")
+            # Обновляем отображение
+            self.refresh_levels()
+    
+    def select_level(self, instance):
+        level = self.levels[instance.level_index]
+        game_screen = self.manager.get_screen('game')
+        game_screen.loaded_level = level
+        self.manager.current = 'game'
+    
+    def go_back(self, instance):
+        self.manager.current = 'menu'
+
+from kivy.config import Config
+Config.set('input', 'mouse', 'mouse,disable_multitouch')
 class CutPolygonApp(App):
     def build(self):
+        Window.show_cursor_touch = False
         Window.clearcolor = COLOR_BACKGROUND
         sm = ScreenManager()
         sm.add_widget(MainMenu(name='menu'))
         sm.add_widget(GameScreen(name='game'))
+        sm.add_widget(LevelSelectScreen(name='level_select'))
         return sm
 
 
